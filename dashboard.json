@@ -1,0 +1,40 @@
+{
+    "widgets": [
+      {
+        "type": "metric",
+        "x": 0,
+        "y": 0,
+        "width": 12,
+        "height": 6,
+        "properties": {
+          "metrics": [
+            [ "AWS/SecurityHub", "Findings", "Severity", "CRITICAL", { "label": "Critical Findings" } ],
+            [ ".", ".", "Severity", "HIGH", { "label": "High Findings" } ],
+            [ ".", ".", "Severity", "MEDIUM", { "label": "Medium Findings" } ],
+            [ ".", ".", "Severity", "LOW", { "label": "Low Findings" } ]
+          ],
+          "view": "timeSeries",
+          "stacked": false,
+          "region": "${var.aws_region}",
+          "title": "Security Hub Findings by Severity",
+          "period": 300
+        }
+      },
+      {
+        "type": "metric",
+        "x": 12,
+        "y": 0,
+        "width": 12,
+        "height": 6,
+        "properties": {
+          "metrics": [
+            [ "AWS/SecurityHub", "ComplianceStatus", "Status", "FAILED", { "label": "Non-Compliant Resources" } ],
+            [ ".", ".", "Status", "PASSED", { "label": "Compliant Resources" } ]
+          ],
+          "view": "pie",
+          "region": "${var.aws_region}",
+          "title": "CIS Benchmark Compliance Status"
+        }
+      }
+    ]
+  }
