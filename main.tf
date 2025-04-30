@@ -133,71 +133,6 @@ resource "aws_securityhub_standards_subscription" "standards" {
   standards_arn = each.value
 }
 
-# IAM role for Lambda
-resource "aws_iam_role" "lambda_role" {
-  name = "${var.project_name}-lambda-role"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action    = "sts:AssumeRole"
-        Effect    = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy" "lambda_policy" {
-  name = "${var.project_name}-lambda-policy"
-  role = aws_iam_role.lambda_role.id
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Resource = "*"
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "securityhub:GetFindings",
-          "sns:Publish"
-        ]
-        Resource = "*"
-      }
-    ]
-  })
-}
-
-# Lambda function to process Security Hub findings
-data "archive_file" "lambda_zip" {
-  type        = "zip"
-  source_file = "lambda_function.py"
-  output_path = "lambda_function.zip"
-}
-
-resource "aws_lambda_function" "process_findings" {
-  function_name = "${var.project_name}-process-findings"
-  filename      = data.archive_file.lambda_zip.output_path
-  role          = aws_iam_role.lambda_role.arn
-  handler       = "lambda_function.lambda_handler"
-  runtime       = "python3.9"
-  timeout       = 30
-  environment {
-    variables = {
-      SNS_TOPIC_ARN = aws_sns_topic.alerts.arn
-    }
-  }
-}
-
 # SNS topic for notifications
 resource "aws_sns_topic" "alerts" {
   name = "${var.project_name}-security-alerts"
@@ -209,10 +144,10 @@ resource "aws_sns_topic_subscription" "email" {
   endpoint  = var.alert_email
 }
 
-# EventBridge rule to trigger Lambda on Security Hub findings
+# EventBridge rule to trigger SNS on Security Hub findings
 resource "aws_cloudwatch_event_rule" "securityhub_findings" {
   name        = "${var.project_name}-securityhub-findings"
-  description = "Trigger Lambda on new Security Hub findings"
+  description = "Send Security Hub findings to SNS"
   event_pattern = jsonencode({
     source      = ["aws.securityhub"]
     detail-type = ["Security Hub Findings - Imported"]
@@ -226,22 +161,38 @@ resource "aws_cloudwatch_event_rule" "securityhub_findings" {
   })
 }
 
-resource "aws_cloudwatch_event_target" "lambda" {
+resource "aws_cloudwatch_event_target" "sns" {
   rule      = aws_cloudwatch_event_rule.securityhub_findings.name
-  target_id = "ProcessFindings"
-  arn       = aws_lambda_function.process_findings.arn
+  target_id = "SendToSNS"
+  arn       = aws_sns_topic.alerts.arn
+  input_transformer {
+    input_paths = {
+      severity    = "$.detail.findings[0].Severity.Label"
+      title       = "$.detail.findings[0].Title"
+      description = "$.detail.findings[0].Description"
+    }
+    input_template = <<EOF
+{
+  "message": "Security Hub Finding Description: <description>",
+  "subject": "<severity> Severity Finding: <title>"
+}
+EOF
+  }
 }
 
-resource "aws_lambda_permission" "eventbridge" {
-  statement_id  = "AllowExecutionFromEventBridge"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.process_findings.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.securityhub_findings.arn
-}
-
-# CloudWatch Dashboard
-resource "aws_cloudwatch_dashboard" "compliance_dashboard" {
-  dashboard_name = "${var.project_name}-compliance-dashboard"
-  dashboard_body = file("dashboard.json")
+resource "aws_sns_topic_policy" "sns_topic_policy" {
+  arn = aws_sns_topic.alerts.arn
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "events.amazonaws.com"
+        }
+        Action = "sns:Publish"
+        Resource = aws_sns_topic.alerts.arn
+      }
+    ]
+  })
 }
