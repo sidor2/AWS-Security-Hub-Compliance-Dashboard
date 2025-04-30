@@ -63,7 +63,7 @@ resource "aws_config_configuration_recorder" "default" {
   name     = "default"
   role_arn = aws_iam_role.config_role.arn
   recording_group {
-    all_supported = true
+    all_supported                 = true
   }
 }
 
@@ -83,8 +83,13 @@ resource "aws_iam_role" "config_role" {
   })
 }
 
-resource "aws_iam_role_policy" "config_policy" {
-  name = "${var.project_name}-config-policy"
+resource "aws_iam_role_policy_attachment" "config_policy" {
+  role       = aws_iam_role.config_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWS_ConfigRole"
+}
+
+resource "aws_iam_role_policy" "config_s3_policy" {
+  name = "${var.project_name}-config-s3-policy"
   role = aws_iam_role.config_role.id
   policy = jsonencode({
     Version = "2012-10-17"
@@ -100,11 +105,6 @@ resource "aws_iam_role_policy" "config_policy" {
           "${aws_s3_bucket.config_bucket.arn}",
           "${aws_s3_bucket.config_bucket.arn}/*"
         ]
-      },
-      {
-        Effect = "Allow"
-        Action = "config:*"
-        Resource = "*"
       }
     ]
   })
@@ -127,9 +127,10 @@ resource "aws_securityhub_account" "main" {
   depends_on = [aws_config_configuration_recorder_status.default]
 }
 
-resource "aws_securityhub_standards_subscription" "cis" {
+resource "aws_securityhub_standards_subscription" "standards" {
+  for_each      = var.securityhub_standards_arns
   depends_on    = [aws_securityhub_account.main]
-  standards_arn = "arn:aws:securityhub:::ruleset/cis-aws-foundations-benchmark/v/1.2.0"
+  standards_arn = each.value
 }
 
 # IAM role for Lambda
@@ -218,7 +219,7 @@ resource "aws_cloudwatch_event_rule" "securityhub_findings" {
     detail = {
       findings = {
         Severity = {
-          Label = ["CRITICAL", "HIGH"]
+          Label = var.securityhub_severity_labels
         }
       }
     }
